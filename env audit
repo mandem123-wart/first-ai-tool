@@ -1,0 +1,182 @@
+import { readFileSync, existsSync } from 'fs';
+import { join, resolve } from 'path';
+import { glob } from 'glob';
+import chalk from 'chalk';
+
+/**
+ * Parse a .env file into a key->value map
+ */
+function parseEnvFile(filePath) {
+  if (!existsSync(filePath)) return {};
+  const content = readFileSync(filePath, 'utf8');
+  const vars = {};
+
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex === -1) continue;
+    const key = trimmed.slice(0, eqIndex).trim();
+    const value = trimmed.slice(eqIndex + 1).trim();
+    if (key) vars[key] = value;
+  }
+
+  return vars;
+}
+
+/**
+ * Scan source files for process.env.VAR_NAME references
+ */
+async function scanSourceFiles(dir) {
+  const patterns = [
+    '**/*.js', '**/*.ts', '**/*.jsx', '**/*.tsx',
+    '**/*.mjs', '**/*.cjs', '**/*.mts', '**/*.cts'
+  ];
+
+  const ignore = [
+    '**/node_modules/**', '**/.git/**', '**/dist/**',
+    '**/build/**', '**/.next/**', '**/coverage/**'
+  ];
+
+  const files = await glob(patterns, { cwd: dir, ignore, absolute: true });
+
+  const usedVars = new Map(); // varName -> [files where it's used]
+
+  for (const file of files) {
+    try {
+      const content = readFileSync(file, 'utf8');
+      // Match process.env.VAR_NAME and process.env['VAR_NAME'] and process.env["VAR_NAME"]
+      const matches = [
+        ...content.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g),
+        ...content.matchAll(/process\.env\[['"]([A-Z_][A-Z0-9_]*)['"]\]/g),
+      ];
+
+      for (const match of matches) {
+        const varName = match[1];
+        if (!usedVars.has(varName)) usedVars.set(varName, []);
+        const relPath = file.replace(resolve(dir) + '/', '');
+        if (!usedVars.get(varName).includes(relPath)) {
+          usedVars.get(varName).push(relPath);
+        }
+      }
+    } catch {
+      // skip unreadable files
+    }
+  }
+
+  return usedVars;
+}
+
+/**
+ * Main audit function
+ */
+export async function audit(dir, options) {
+  const absDir = resolve(dir);
+  const envPath = join(absDir, options.env);
+  const examplePath = join(absDir, options.example);
+
+  console.log(chalk.bold('\n🔍 env-audit\n'));
+  console.log(chalk.dim(`  Project: ${absDir}`));
+  console.log(chalk.dim(`  .env:    ${options.env}`));
+  console.log(chalk.dim(`  example: ${options.example}\n`));
+
+  // Parse files
+  const envVars = parseEnvFile(envPath);
+  const exampleVars = parseEnvFile(examplePath);
+  const usedInCode = await scanSourceFiles(absDir);
+
+  const envKeys = new Set(Object.keys(envVars));
+  const exampleKeys = new Set(Object.keys(exampleVars));
+  const usedKeys = new Set(usedInCode.keys());
+
+  // --- Analysis ---
+
+  // 1. Vars in .env but never used in code
+  const unused = [...envKeys].filter(k => !usedKeys.has(k));
+
+  // 2. Vars used in code but not declared in .env
+  const undeclared = [...usedKeys].filter(k => !envKeys.has(k));
+
+  // 3. Vars in .env but missing from .env.example
+  const missingFromExample = [...envKeys].filter(k => !exampleKeys.has(k));
+
+  // 4. Vars in .env.example but not in .env
+  const missingFromEnv = [...exampleKeys].filter(k => !envKeys.has(k));
+
+  // 5. Vars used in code and properly declared
+  const healthy = [...envKeys].filter(k => usedKeys.has(k));
+
+  // --- Output ---
+
+  let hasIssues = false;
+
+  if (healthy.length > 0) {
+    console.log(chalk.green.bold(`✅ Healthy (${healthy.length})`));
+    for (const key of healthy) {
+      const files = usedInCode.get(key) || [];
+      console.log(chalk.green(`   ${key}`) + chalk.dim(` → used in ${files.length} file(s)`));
+    }
+    console.log();
+  }
+
+  if (unused.length > 0) {
+    hasIssues = true;
+    console.log(chalk.yellow.bold(`⚠️  Unused in code (${unused.length})`));
+    console.log(chalk.dim('   Defined in .env but never referenced via process.env'));
+    for (const key of unused) {
+      console.log(chalk.yellow(`   ${key}`));
+    }
+    console.log();
+  }
+
+  if (undeclared.length > 0) {
+    hasIssues = true;
+    console.log(chalk.red.bold(`❌ Undeclared in .env (${undeclared.length})`));
+    console.log(chalk.dim('   Used in code but missing from your .env file'));
+    for (const key of undeclared) {
+      const files = usedInCode.get(key) || [];
+      console.log(chalk.red(`   ${key}`) + chalk.dim(` → ${files.join(', ')}`));
+    }
+    console.log();
+  }
+
+  if (missingFromExample.length > 0) {
+    hasIssues = true;
+    console.log(chalk.blue.bold(`📋 Missing from .env.example (${missingFromExample.length})`));
+    console.log(chalk.dim('   In .env but not documented in .env.example'));
+    for (const key of missingFromExample) {
+      console.log(chalk.blue(`   ${key}`));
+    }
+    console.log();
+  }
+
+  if (missingFromEnv.length > 0) {
+    hasIssues = true;
+    console.log(chalk.magenta.bold(`❓ In .env.example but not in .env (${missingFromEnv.length})`));
+    console.log(chalk.dim('   Documented but not set locally — may cause issues'));
+    for (const key of missingFromEnv) {
+      console.log(chalk.magenta(`   ${key}`));
+    }
+    console.log();
+  }
+
+  if (!existsSync(envPath)) {
+    console.log(chalk.red(`  ✗ No ${options.env} file found at ${envPath}`));
+    process.exit(1);
+  }
+
+  // Summary
+  const total = envKeys.size;
+  const issues = unused.length + undeclared.length + missingFromExample.length + missingFromEnv.length;
+
+  console.log(chalk.bold('─'.repeat(50)));
+  if (!hasIssues) {
+    console.log(chalk.green.bold('✨ All clear! No issues found.'));
+  } else {
+    console.log(chalk.bold(`Found ${chalk.red(issues)} issue(s) across ${total} variable(s).`));
+    console.log(chalk.dim('\nTip: run `env-audit generate` to auto-create a clean .env.example'));
+  }
+  console.log();
+
+  process.exit(hasIssues ? 1 : 0);
+}
