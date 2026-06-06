@@ -111,7 +111,7 @@ export async function audit(dir, options) {
   let hasIssues = false;
 
   if (healthy.length > 0) {
-    console.log(chalk.green.bold(` Healthy (${healthy.length})`));
+    console.log(chalk.green.bold(`✅ Healthy (${healthy.length})`));
     for (const key of healthy) {
       const files = usedInCode.get(key) || [];
       console.log(chalk.green(`   ${key}`) + chalk.dim(` → used in ${files.length} file(s)`));
@@ -121,7 +121,7 @@ export async function audit(dir, options) {
 
   if (unused.length > 0) {
     hasIssues = true;
-    console.log(chalk.yellow.bold(`  Unused in code (${unused.length})`));
+    console.log(chalk.yellow.bold(`⚠️  Unused in code (${unused.length})`));
     console.log(chalk.dim('   Defined in .env but never referenced via process.env'));
     for (const key of unused) {
       console.log(chalk.yellow(`   ${key}`));
@@ -131,7 +131,7 @@ export async function audit(dir, options) {
 
   if (undeclared.length > 0) {
     hasIssues = true;
-    console.log(chalk.red.bold(` Undeclared in .env (${undeclared.length})`));
+    console.log(chalk.red.bold(`❌ Undeclared in .env (${undeclared.length})`));
     console.log(chalk.dim('   Used in code but missing from your .env file'));
     for (const key of undeclared) {
       const files = usedInCode.get(key) || [];
@@ -152,7 +152,7 @@ export async function audit(dir, options) {
 
   if (missingFromEnv.length > 0) {
     hasIssues = true;
-    console.log(chalk.magenta.bold(` In .env.example but not in .env (${missingFromEnv.length})`));
+    console.log(chalk.magenta.bold(`❓ In .env.example but not in .env (${missingFromEnv.length})`));
     console.log(chalk.dim('   Documented but not set locally — may cause issues'));
     for (const key of missingFromEnv) {
       console.log(chalk.magenta(`   ${key}`));
@@ -171,7 +171,7 @@ export async function audit(dir, options) {
 
   console.log(chalk.bold('─'.repeat(50)));
   if (!hasIssues) {
-    console.log(chalk.green.bold(' All clear! No issues found.'));
+    console.log(chalk.green.bold('✨ All clear! No issues found.'));
   } else {
     console.log(chalk.bold(`Found ${chalk.red(issues)} issue(s) across ${total} variable(s).`));
     console.log(chalk.dim('\nTip: run `env-audit generate` to auto-create a clean .env.example'));

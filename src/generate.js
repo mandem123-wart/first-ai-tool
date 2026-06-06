@@ -60,7 +60,7 @@ export async function generate(dir, options) {
   const envPath = join(absDir, options.env);
   const outputPath = join(absDir, options.output);
 
-  console.log(chalk.bold('\n env-audit generate\n'));
+  console.log(chalk.bold('\n📋 env-audit generate\n'));
 
   if (!existsSync(envPath)) {
     console.log(chalk.red(`✗ No ${options.env} found at ${envPath}`));
@@ -110,7 +110,7 @@ export async function generate(dir, options) {
 
   writeFileSync(outputPath, lines.join('\n'), 'utf8');
 
-  console.log(chalk.green(` Generated ${options.output}`));
+  console.log(chalk.green(`✅ Generated ${options.output}`));
   console.log(chalk.dim(`   ${usedKeys.length} active, ${unusedKeys.length} unused, ${undeclared.length} undeclared`));
   console.log();
 }
